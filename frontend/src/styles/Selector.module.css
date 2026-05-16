@@ -1,0 +1,25 @@
+.selectorWrap {
+  margin-top: 14px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 6px;
+  color: #475569;
+}
+
+.select {
+  width: 100%;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+/* Dark mode override when documentElement has .dark */
+:global(.dark) .select {
+  background: #0e1727;
+  color: #e5e7eb;
+  border-color: rgba(255, 255, 255, 0.12);
+}

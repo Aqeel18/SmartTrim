@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* LIGHT MODE (Default fallback) */
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --surface-highlight: #f1f5f9;
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+    --primary: #0ea5e9;
+    --primary-dark: #0284c7;
+    --accent: #f59e0b;
+    --primary-glow-start: rgba(14, 165, 233, 0.2);
+    --primary-glow-end: rgba(14, 165, 233, 0.6);
+  }
+
+  .dark {
+    /* DARK MODE */
+    --bg: #050505;
+    --surface: #111111;
+    --surface-highlight: #1a1a1a;
+    --text-main: #ffffff;
+    --text-muted: #9ca3af;
+    --primary: #00e5ff;
+    --primary-dark: #00b8cc;
+    --accent: #d4af37;
+    --primary-glow-start: rgba(0, 229, 255, 0.2);
+    --primary-glow-end: rgba(0, 229, 255, 0.6);
+  }
+
+  html, body, #root {
+    height: 100%;
+    background-color: var(--bg);
+    color: var(--text-main);
+    @apply antialiased font-sans transition-colors duration-500;
+  }
+  
+  html.dark { color-scheme: dark; }
+  html.light { color-scheme: light; }
+
+  /* Custom scrollbar for premium feel */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { 
+    background: color-mix(in srgb, var(--text-muted), transparent 70%); 
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { 
+    background: color-mix(in srgb, var(--text-muted), transparent 50%); 
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    background-color: color-mix(in srgb, var(--surface), transparent 40%);
+    backdrop-filter: blur(40px);
+    border: 1px solid color-mix(in srgb, var(--text-main), transparent 90%);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  }
+  
+  .text-gradient {
+    background-image: linear-gradient(to right, var(--primary), var(--accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .clip-diagonal {
+    clip-path: polygon(0 0, 100% 0, 100% 85%, 0% 100%);
+  }
+}

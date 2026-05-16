@@ -1,0 +1,43 @@
+.dropzone {
+  position: relative;
+  border: 1px dashed #e2e8f0;
+  border-radius: 12px;
+  min-height: 180px;
+  max-height: 320px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.placeholder {
+  color: #64748b;
+  padding: 16px;
+  text-align: center;
+}
+
+.preview {
+  width: 100%;
+  height: auto;
+  max-height: 300px;
+  object-fit: contain;
+  padding: 10px;
+}
+
+.input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Dark mode overrides */
+:global(.dark) .dropzone {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+:global(.dark) .placeholder {
+  color: #94a3b8;
+}
