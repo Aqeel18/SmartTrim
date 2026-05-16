@@ -16,3 +16,5 @@ frontend/.vite/
 
 test_images/validation_*.png
 test_images/output_*.png
+results/
+uploads/
