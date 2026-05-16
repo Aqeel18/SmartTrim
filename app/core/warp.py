@@ -310,57 +310,26 @@ class HairstyleWarper:
         output_shape: Tuple[int, int]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Applies Thin Plate Spline warping using OpenCV remap.
+        Applies Thin Plate Spline (TPS) warping via a dense NumPy remap.
+
+        We solve TPS in the inverse direction (DST → SRC) so that every output
+        pixel can look up its source coordinate in the input image, which is
+        what cv2.remap requires.
+
+        Using pure NumPy for the TPS solve avoids the awkward Python bindings of
+        cv2.createThinPlateSplineShapeTransformer (which is designed for shape
+        matching, not dense image warping).
         """
         h, w = output_shape
-        
-        # TPS solves for function f(p) such that f(dst_i) = src_i
-        # We need the inverse map for cv2.remap: for every pixel in output (dst), where does it come from in input (src)?
-        # So we fit TPS: DST -> SRC
-        
-        tps = cv2.createThinPlateSplineShapeTransformer()
-        
-        # Reshape points for OpenCV Shape Transformer: (1, N, 2)
-        src_pts_reshaped = src_points.reshape(1, -1, 2)
-        dst_pts_reshaped = dst_points.reshape(1, -1, 2)
-        
-        # Matches: just 1-to-1 sequential matches
-        matches = [cv2.DMatch(i, i, 0) for i in range(len(src_points))]
-        
-        # Estimate transformation DST -> SRC
-        # Note: estimateTransformation takes (points1, points2, matches)
-        # We want to map FROM output coordinates TO input coordinates.
-        tps.estimateTransformation(dst_pts_reshaped, src_pts_reshaped, matches)
-        
-        # Create grid of coordinates for the output image
-        # applyTransformation returns the transformed points
-        # But applyTransformation works on a list of points. We need a dense map.
-        # Iterating over all pixels is slow.
-        # Efficient approach: Use applyTransformation on a grid and interpolate, or check if there's a simpler way.
-        
-        # Actually, tps.applyTransformation is designed for point sets, not dense images.
-        # And standard cv2.warpAffine/Perspective uses matrices.
-        # For TPS image warping in OpenCV, we usually compute the map manually or use `tps.warpImage` if available (it handles the map generation).
-        
-        # Let's check if tps.warpImage exists.
-        # It usually does in C++, but in Python bindings it might be tricky or require the image as input to the 'apply' which is not how it works.
-        # The ShapeTransformer class is mainly for shape matching.
-        
-        # ALTERNATIVE: Use the _tps_dense_map implementation (pure numpy) if OpenCV's shape transformer is unwieldy or unavailable.
-        # Given "Use OpenCV (and NumPy) only" and likely standard opencv-python, 
-        # let's write a clean, deterministic NumPy implementation of the TPS calculation for the remap coordinates.
-        
-        grid_y, grid_x = np.mgrid[0:h, 0:w]
-        grid_pts = np.vstack((grid_x.ravel(), grid_y.ravel())).T # (H*W, 2)
-        
-        # Implement simplified TPS for generating map_x, map_y
+
         map_x, map_y = self._numpy_tps_map(dst_points, src_points, h, w)
-        
-        # Apply remap
-        # Use INTER_LANCZOS4 or INTER_CUBIC for best quality (sharpness)
-        warped_img = cv2.remap(img, map_x, map_y, cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT)
-        warped_mask = cv2.remap(mask, map_x, map_y, cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT)
-        
+
+        # INTER_CUBIC gives a good sharpness / speed trade-off.
+        warped_img  = cv2.remap(img,  map_x, map_y, cv2.INTER_CUBIC,
+                                borderMode=cv2.BORDER_CONSTANT)
+        warped_mask = cv2.remap(mask, map_x, map_y, cv2.INTER_CUBIC,
+                                borderMode=cv2.BORDER_CONSTANT)
+
         return warped_img, warped_mask
 
     def _numpy_tps_map(self, dst_pts, src_pts, h, w):

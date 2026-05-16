@@ -1,10 +1,12 @@
 import numpy as np
 import cv2
 import torch
+import torch.nn.functional as F
 import torchvision.models as models
 import torchvision.transforms as transforms
 from PIL import Image
 import os
+from typing import Dict, Optional, Tuple
 
 class FaceShapeClassifier:
     """
@@ -99,38 +101,46 @@ class FaceShapeClassifier:
             'chin_angle': float(chin_angle)
         }
 
-    def classify_geometric(self, metrics):
-        fl = metrics['face_length']
+    def classify_geometric(self, metrics: dict) -> Tuple[str, float]:
+        """
+        Rule-based geometric classifier with a confidence score.
+
+        Confidence is estimated by how decisively the face satisfies one shape's
+        primary criterion versus the others. Returns (shape_label, confidence 0-1).
+        """
+        fl = metrics['face_length']        # normalized by cheekbone width
         fw = metrics['forehead_width']
         jw = metrics['jaw_width']
         ca = metrics['chin_angle']
-        # fw_to_jw = fw / max(jw, 1e-6)
-        # cheekbone_prominence = max(0.0, 1.0 - 0.5 * (fw + jw))
 
-        # Ratios based on standard facial geometry
-        # fl/cw (face length to cheekbone width)
-        # fw/cw (forehead to cheekbone)
-        # jw/cw (jaw to cheekbone)
+        # Each candidate is scored by how strongly it satisfies its criteria.
+        # Margin > 0 means the criterion is met; larger margin = higher confidence.
+        candidates = {
+            'Oblong':  fl - 1.25,                                 # longer face
+            'Square':  min(jw - 0.88, (ca - 115) / 30),          # wide jaw + obtuse angle
+            'Heart':   min(fw - 1.02, (105 - ca) / 30),          # wide forehead + acute chin
+            'Diamond': min(0.75 - jw, (100 - ca) / 30),          # narrow jaw + acute chin
+            'Round':   1.12 - fl,                                  # short face
+            'Oval':    0.05,                                       # weakest default
+        }
 
-        if fl > 1.25:
-            return 'Oblong'
-        
-        if jw > 0.88 and ca > 115:
-            return 'Square'
-            
-        if fw > 1.02 and ca < 105:
-            return 'Heart'
-            
-        if jw < 0.75 and ca < 100:
-            return 'Diamond'
-            
-        if fl < 1.12:
-            return 'Round'
-            
-        # Default fallback to Oval
-        return 'Oval'
+        # Pick the highest-scoring candidate
+        best_shape = max(candidates, key=lambda k: candidates[k])
+        best_score = candidates[best_shape]
 
-    def classify_ml(self, face_bgr):
+        # Compute second-best to measure separation
+        sorted_scores = sorted(candidates.values(), reverse=True)
+        margin = sorted_scores[0] - sorted_scores[1] if len(sorted_scores) > 1 else best_score
+
+        # Map margin to a [0.5, 0.95] confidence range
+        confidence = float(np.clip(0.55 + margin * 2.0, 0.50, 0.95))
+
+        return best_shape, confidence
+
+    def classify_ml(self, face_bgr: np.ndarray) -> Optional[Tuple[str, float, Dict[str, float]]]:
+        """
+        ML-based classifier. Returns (label, confidence, per_class_scores) or None.
+        """
         if self.ml_model is None or face_bgr is None:
             return None
             
@@ -140,27 +150,53 @@ class FaceShapeClassifier:
             img_t = self.transform(img).unsqueeze(0).to(self.device)
             
             with torch.no_grad():
-                out = self.ml_model(img_t)
-                _, pred = torch.max(out, 1)
-                return self.class_names[pred.item()]
+                logits = self.ml_model(img_t)                    # (1, num_classes)
+                probs  = F.softmax(logits, dim=1)[0]             # (num_classes,)
+                pred_idx = int(torch.argmax(probs).item())
+                label    = self.class_names[pred_idx]
+                confidence = float(probs[pred_idx].item())
+                scores = {
+                    name: round(float(probs[i].item()), 4)
+                    for i, name in enumerate(self.class_names)
+                }
+            return label, confidence, scores
         except Exception as e:
             print(f"ML classification failed: {e}")
             return None
 
-    def analyze(self, landmarks_pixel, face_bgr=None):
-        metrics = self.compute_metrics(landmarks_pixel)
-        
-        # Try ML first
-        face_shape = None
-        if self.ml_model is not None and face_bgr is not None:
-            face_shape = self.classify_ml(face_bgr)
-            
-        # Fallback to geometric
-        if face_shape is None:
-            face_shape = self.classify_geometric(metrics)
-            
-        return {
-            'face_shape': face_shape,
-            'metrics': metrics
-        }
+    def analyze(self, landmarks_pixel, face_bgr=None) -> dict:
+        """
+        Run face shape classification, preferring the ML model when available.
 
+        Returns a dict with:
+          - face_shape (str)
+          - confidence (float, 0-1)
+          - scores (dict mapping each shape to its probability/score)
+          - method ('ml' or 'geometric')
+          - metrics (raw geometric measurements)
+        """
+        metrics = self.compute_metrics(landmarks_pixel)
+
+        # --- Try ML first ---
+        ml_result = None
+        if self.ml_model is not None and face_bgr is not None:
+            ml_result = self.classify_ml(face_bgr)
+
+        if ml_result is not None:
+            face_shape, confidence, scores = ml_result
+            method = 'ml'
+        else:
+            # --- Geometric fallback ---
+            face_shape, confidence = self.classify_geometric(metrics)
+            # Build a pseudo-scores dict so the API response is consistent
+            scores = {s: round(confidence if s == face_shape else (1 - confidence) / (len(self.class_names) - 1), 4)
+                      for s in self.class_names}
+            method = 'geometric'
+
+        return {
+            'face_shape':  face_shape,
+            'confidence':  round(confidence, 4),
+            'scores':      scores,
+            'method':      method,
+            'metrics':     metrics,
+        }

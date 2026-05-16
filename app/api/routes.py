@@ -98,7 +98,12 @@ async def analyze_face_shape(image: UploadFile = File(...)):
             raise HTTPException(status_code=422, detail="No face detected in the image.")
 
         landmarks_pixel = analysis_result['landmarks_pixel']
-        # Now passing face_bgr to utilize the ML classifier fallback
+        head_pose       = analysis_result.get('head_pose', {})
+
+        # Warn if the face is significantly turned — results will be less accurate
+        is_front_facing = head_pose.get('is_front_facing', True)
+
+        # Now passing face_bgr to utilise the ML classifier when weights are present
         fs_result = face_shape_classifier.analyze(landmarks_pixel, face_bgr=face_bgr)
 
         # Gather available style values
@@ -113,10 +118,15 @@ async def analyze_face_shape(image: UploadFile = File(...)):
         rec_values, reasons = recommender.recommend_with_reasons(fs_result['face_shape'], available_values)
 
         return {
-            'face_shape': fs_result['face_shape'],
-            'metrics': fs_result['metrics'],
-            'recommended': rec_values,
-            'reasons': reasons,
+            'face_shape':      fs_result['face_shape'],
+            'confidence':      fs_result.get('confidence', None),
+            'scores':          fs_result.get('scores', {}),
+            'method':          fs_result.get('method', 'geometric'),
+            'metrics':         fs_result['metrics'],
+            'head_pose':       head_pose,
+            'is_front_facing': is_front_facing,
+            'recommended':     rec_values,
+            'reasons':         reasons,
         }
 
     except HTTPException:
