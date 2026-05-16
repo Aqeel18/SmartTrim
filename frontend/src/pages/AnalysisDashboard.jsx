@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppContext } from '../context/AppContext.jsx'
-import { analyzeFaceShape, fetchHairstyles } from '../api.js'
+import { analyzeFaceShape, fetchHairstyles, fetchSemanticRecommendations } from '../api.js'
 import AnimatedCard from '../components/AnimatedCard.jsx'
-import { ShieldCheckIcon, AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
+import { ShieldCheckIcon, AdjustmentsHorizontalIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 
 // Simple SVG Face Shape Diagram
 const FaceShapeDiagram = ({ shape = 'oval', className = "w-24 h-24" }) => {
@@ -51,10 +51,9 @@ export default function AnalysisDashboard() {
     allStyles, setAllStyles,
     resetFlow
   } = useAppContext()
-  const [analyzing, setAnalyzing] = useState(true)
-  const [error, setError] = useState(null)
-
-  // State to track which style is being "previewed" in the Before/After section
+  const [analyzing, setAnalyzing]   = useState(true)
+  const [error, setError]           = useState(null)
+  const [clipScores, setClipScores] = useState({})   // value → score (0-1)
   const [previewStyle, setPreviewStyle] = useState(null)
 
   useEffect(() => {
@@ -81,15 +80,11 @@ export default function AnalysisDashboard() {
 
         setFaceShapeResult(analysisRes)
 
-        const flatStyles = Object.values(stylesRes || {}).flat().filter((s) => s.source === 'cleaned')
+        const flatStyles = Object.values(stylesRes || {}).flat().filter(s => s.source === 'cleaned')
         setAllStyles(flatStyles)
 
         const recs = Array.isArray(analysisRes.recommended) ? analysisRes.recommended : []
-        let matchedStyles = []
-        if (recs.length > 0) {
-          matchedStyles = flatStyles.filter(s => recs.includes(s.value))
-        }
-        
+        let matchedStyles = flatStyles.filter(s => recs.includes(s.value))
         if (matchedStyles.length < 3) {
           matchedStyles = [...matchedStyles, ...flatStyles.filter(s => !matchedStyles.includes(s))].slice(0, 4)
         }
@@ -97,6 +92,35 @@ export default function AnalysisDashboard() {
         setRecommendedStyles(matchedStyles)
         setPreviewStyle(matchedStyles[0])
         setAnalyzing(false)
+
+        // Fire CLIP recommendations after showing the UI
+        try {
+          const clipRes = await fetchSemanticRecommendations(uploadedImage, analysisRes.face_shape)
+          if (!isMounted) return
+
+          const scores = {}
+          const clipValues = []
+          ;(clipRes.recommendations || []).forEach(r => {
+            scores[r.value] = r.score
+            clipValues.push(r.value)
+          })
+          setClipScores(scores)
+
+          // Re-rank recommended styles by CLIP score if available
+          if (clipValues.length > 0) {
+            const clipMatched = flatStyles
+              .filter(s => clipValues.includes(s.value))
+              .sort((a, b) => (scores[b.value] ?? 0) - (scores[a.value] ?? 0))
+              .slice(0, 6)
+            if (clipMatched.length > 0 && isMounted) {
+              setRecommendedStyles(clipMatched)
+              setPreviewStyle(clipMatched[0])
+            }
+          }
+        } catch (clipErr) {
+          console.warn('[Dashboard] CLIP recommendations failed, using rule-based:', clipErr.message)
+        }
+
       } catch (err) {
         if (!isMounted) return
         setError(err.message || 'Failed to analyze face shape')
@@ -105,7 +129,6 @@ export default function AnalysisDashboard() {
     }
 
     setTimeout(runAnalysis, 2500)
-
     return () => { isMounted = false }
   }, [uploadedImage, faceShapeResult, recommendedStyles, allStyles, navigate, setFaceShapeResult, setRecommendedStyles, setAllStyles, previewStyle])
 
@@ -212,18 +235,47 @@ export default function AnalysisDashboard() {
                  </div>
               </div>
 
-              {/* Right: Analysis Details */}
               <div className="lg:col-span-5 space-y-8">
                  <div>
-                    <div className="inline-flex items-center gap-2 mb-4 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full">
+                    <div className="inline-flex items-center gap-2 mb-2 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full">
                        <FaceShapeDiagram shape={faceShapeResult?.face_shape} className="w-6 h-6" />
                        <span className="text-xs font-bold text-primary tracking-widest uppercase">{faceShapeResult?.face_shape} Profile</span>
                     </div>
+
+                    {/* Classification method + head pose warning */}
+                    <div className="flex items-center gap-2 mb-4">
+                       {faceShapeResult?.method && (
+                         <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border
+                           ${faceShapeResult.method === 'ml'
+                             ? 'text-green-400 border-green-400/30 bg-green-400/10'
+                             : 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10'}`}>
+                           {faceShapeResult.method === 'ml' ? '✦ ML Model' : '◈ Geometric'}
+                         </span>
+                       )}
+                       {faceShapeResult?.confidence != null && (
+                         <span className="text-[9px] font-mono text-textMuted">
+                           {Math.round(faceShapeResult.confidence * 100)}% confidence
+                         </span>
+                       )}
+                    </div>
+
+                    {/* Head pose warning */}
+                    {faceShapeResult?.is_front_facing === false && (
+                      <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                        <ExclamationTriangleIcon className="w-4 h-4 text-yellow-400 shrink-0" />
+                        <p className="text-[10px] text-yellow-300 font-medium">
+                          Head is turned ({Math.round(Math.abs(faceShapeResult.head_pose?.yaw ?? 0))}° yaw).
+                          Front-facing photos give more accurate results.
+                        </p>
+                      </div>
+                    )}
+
                     <h2 className="text-4xl md:text-5xl font-display font-bold text-textMain leading-[1.1] mb-4 uppercase">
                        Style Transformation <span className="text-gradient">Unlocked.</span>
                     </h2>
                     <p className="text-textMuted text-lg leading-relaxed font-light">
-                       Your facial geometry suggests high compatibility with structured, volumetric styles. We've curated these matches based on your {faceShapeResult?.face_shape} jawline and forehead width.
+                       Your facial geometry suggests high compatibility with structured, volumetric styles.
+                       We've curated these matches based on your {faceShapeResult?.face_shape} jawline and forehead width.
                     </p>
                  </div>
 
@@ -249,9 +301,15 @@ export default function AnalysisDashboard() {
                <div className="flex items-end justify-between border-b border-white/10 pb-6">
                   <div>
                     <h3 className="text-2xl font-display font-bold text-textMain uppercase tracking-tighter">Precision Matches</h3>
-                    <p className="text-textMuted text-xs uppercase tracking-[0.2em] mt-1 opacity-60">High confidence matches for your structure</p>
+                    <p className="text-textMuted text-xs uppercase tracking-[0.2em] mt-1 opacity-60">
+                      {Object.keys(clipScores).length > 0 ? 'CLIP semantic ranking' : 'Rule-based matching'}
+                    </p>
                   </div>
-                  <div className="text-[10px] font-bold text-primary tracking-[0.3em] uppercase">AI Confidence: 98.4%</div>
+                  <div className="text-[10px] font-bold text-primary tracking-[0.3em] uppercase">
+                    {faceShapeResult?.confidence != null
+                      ? `AI Confidence: ${Math.round(faceShapeResult.confidence * 100)}%`
+                      : 'AI Matched'}
+                  </div>
                </div>
 
                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
