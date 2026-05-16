@@ -2,6 +2,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.api import routes
+from app.api.auth_routes import auth_router
+from app.api.history_routes import history_router
+from app.db.session import create_tables
 import os
 
 
@@ -14,8 +17,13 @@ async def lifespan(app: FastAPI):
     failures and ensures the server refuses traffic until models are ready.
     """
     print("[SmartTrim 360] Starting up — loading pipeline models...")
+    # Create DB tables (no-op if already exist)
+    try:
+        create_tables()
+        print("[SmartTrim 360] Database tables ready.")
+    except Exception as db_exc:
+        print(f"[SmartTrim 360] WARNING: DB init failed: {db_exc}")
     # Routes initialise models internally; we surface any startup errors here
-    # so the server exits cleanly rather than serving broken requests.
     if not routes.MODELS_LOADED:
         print("[SmartTrim 360] WARNING: One or more pipeline models failed to load.")
         print("[SmartTrim 360] Check logs above. The /preview endpoint may be unavailable.")
@@ -60,6 +68,8 @@ for route_path, directory in _mounts.items():
 
 # ── API routes ────────────────────────────────────────────────────────────────
 app.include_router(routes.router)
+app.include_router(auth_router)
+app.include_router(history_router)
 
 
 @app.get("/", tags=["Health"])

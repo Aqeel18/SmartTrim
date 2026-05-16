@@ -1,0 +1,44 @@
+# Render.com deployment configuration
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # ── FastAPI Backend ────────────────────────────────────────────────────────
+  - type: web
+    name: smarttrim-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free             # upgrade to starter ($7/mo) for always-on
+    region: singapore      # closest to your location
+    branch: main
+    healthCheckPath: /health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true          # Render auto-generates a secure random value
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smarttrim-db
+          property: connectionString
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: DB_ECHO
+        value: "false"
+
+  # ── React Frontend ─────────────────────────────────────────────────────────
+  - type: web
+    name: smarttrim-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    plan: free
+    branch: main
+    routes:
+      # SPA routing — all paths to index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+databases:
+  - name: smarttrim-db
+    plan: free             # 256MB PostgreSQL — sufficient for dev/demo
+    databaseName: smarttrim360
+    user: smarttrim

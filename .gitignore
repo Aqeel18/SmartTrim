@@ -2,12 +2,16 @@ __pycache__/
 *.py[cod]
 *$py.class
 .env
+.env.local
 .venv
 env/
 venv/
 .idea/
 .vscode/
 *.log
+*.db
+*.db-shm
+*.db-wal
 
 # Frontend
 frontend/node_modules/
